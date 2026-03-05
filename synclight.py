@@ -183,17 +183,14 @@ class SyncLight:
             self._write(Protocol.set_color(0, 0, 0))
             log.info("Light → OFF")
 
-    def turn_on(self):
+    def turn_on(self) -> bool:
         r, g, b = self._color
-        # Retry for up to 30s — USB device needs time to re-enumerate after sleep.
-        for attempt in range(30):
-            if attempt > 0:
-                time.sleep(1)
-            self._dev = None
-            if self._ensure_connected() and self._write(Protocol.set_color(r, g, b)):
-                log.info("Light → ON  rgb(%d,%d,%d)", r, g, b)
-                return
-        log.warning("Light → ON failed after retries")
+        self._dev = None
+        if self._ensure_connected() and self._write(Protocol.set_color(r, g, b)):
+            log.info("Light → ON  rgb(%d,%d,%d)", r, g, b)
+            return True
+        log.debug("Light → ON failed, will retry")
+        return False
 
     def set_color(self, r: int, g: int, b: int):
         self._color = (r, g, b)
@@ -265,16 +262,24 @@ def main():
     if was_asleep:
         light.turn_off()
 
+    pending_wake = False   # True when we still need to turn the light on after wake
+
     while True:
         time.sleep(2)
         is_asleep = DisplayMonitor.is_display_asleep()
         if is_asleep and not was_asleep:
             log.info("Display sleeping")
+            pending_wake = False
             light.turn_off()
             light.disconnect()   # release device before USB power cut
         elif not is_asleep and was_asleep:
             log.info("Display waking")
-            light.turn_on()
+            pending_wake = True
+
+        if pending_wake and not is_asleep:
+            if light.turn_on():
+                pending_wake = False
+
         was_asleep = is_asleep
 
 
