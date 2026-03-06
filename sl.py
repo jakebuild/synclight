@@ -134,8 +134,8 @@ def cmd_color(args):
         print(f"Unknown colour '{args[0]}'. Available:", ", ".join(PRESETS))
         sys.exit(1)
 
-    _send(_set_color(r, g, b))
     open(STATE_FILE, "w").write(f"{r} {g} {b}\n")
+    _send(_set_color(r, g, b))
     print(f"Color → rgb({r}, {g}, {b})")
 
 
