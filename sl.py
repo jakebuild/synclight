@@ -70,20 +70,36 @@ DRIVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "syncli
 PYTHON = sys.executable
 
 
-def _driver_running():
+def _driver_pids():
+    """Return list of driver PIDs (excluding our own process)."""
     try:
-        subprocess.check_output(["pgrep", "-f", "python.*synclight.py"], text=True)
-        return True
+        out = subprocess.check_output(
+            ["pgrep", "-fi", "synclight.py"], text=True
+        )
+        own = os.getpid()
+        return [int(p) for p in out.strip().split() if int(p) != own]
     except subprocess.CalledProcessError:
-        return False
+        return []
+
+
+def _driver_running():
+    return len(_driver_pids()) > 0
 
 
 def _send(data):
     # Kill driver to release exclusive HID access, restart it after
     was_running = _driver_running()
     if was_running:
-        subprocess.run(["pkill", "-f", "python.*synclight.py"], capture_output=True)
-        time.sleep(0.5)
+        for pid in _driver_pids():
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        # Wait for the driver to actually release the HID device
+        for _ in range(10):
+            time.sleep(0.3)
+            if not _driver_running():
+                break
 
     try:
         devices = hid.enumerate(VENDOR_ID, PRODUCT_ID)
@@ -94,10 +110,14 @@ def _send(data):
         dev.write(bytes([0x00]) + data)
         dev.close()
     finally:
+        # The LaunchAgent (KeepAlive=true) will auto-restart the driver.
+        # Only manually restart if launchd isn't managing it.
         if was_running:
-            subprocess.Popen([PYTHON, DRIVER_SCRIPT],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+            time.sleep(0.5)
+            if not _driver_running():
+                subprocess.Popen([PYTHON, DRIVER_SCRIPT],
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
 
 
 # ── commands ──────────────────────────────────────────────────────────────────
